@@ -1,0 +1,17 @@
+{
+  "name": "livingodoc",
+  "version": "1.0.0",
+  "description": "A focused AI chat app powered by Gemini",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/index.js",
+    "dev": "node --env-file-if-exists=.env --watch src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  }
+}
