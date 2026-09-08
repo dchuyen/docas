@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 
 const port = Number(process.env.PORT) || 3000;
-const geminiApiKey = process.env.GEMINI_API_KEY;
-const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const openRouterApiKey = process.env.OPENROUTER_API_KEY;
+const openRouterModel = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
 const publicDirectory = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public');
 const projectRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const maxAttachmentBytes = 10 * 1024 * 1024;
@@ -46,55 +46,65 @@ async function readJson(request) {
 	return JSON.parse(body || '{}');
 }
 
-async function askGemini(message, history, attachment, link) {
-	const userParts = [{ text: message }];
-	if (attachment) {
-		userParts.push({
-			inlineData: {
-				mimeType: attachment.mimeType,
-				data: attachment.data,
-			},
-		});
+function createAttachmentPart(attachment) {
+	if (attachment.mimeType.startsWith('image/')) {
+		return { type: 'image_url', image_url: { url: `data:${attachment.mimeType};base64,${attachment.data}` } };
 	}
+	if (attachment.mimeType === 'application/pdf') {
+		return { type: 'file', file: { filename: attachment.name || 'attachment.pdf', file_data: `data:application/pdf;base64,${attachment.data}` } };
+	}
+	return { type: 'text', text: `\n\nNội dung tệp ${attachment.name || 'đính kèm'}:\n${Buffer.from(attachment.data, 'base64').toString('utf8')}` };
+}
+
+async function askOpenRouter(message, history, attachment, link) {
+	const userParts = [{ type: 'text', text: message }];
+	if (attachment) userParts.push(createAttachmentPart(attachment));
 	if (link) {
-		userParts.push({ text: `Liên kết người dùng đính kèm: ${link}\nHãy sử dụng liên kết này làm ngữ cảnh nếu phù hợp.` });
+		userParts.push({ type: 'text', text: `Liên kết người dùng đính kèm: ${link}\nHãy sử dụng liên kết này làm ngữ cảnh nếu phù hợp.` });
 	}
 
 	const contents = [
 		...history.slice(-20).map(({ role, text }) => ({
 			role: role === 'assistant' ? 'model' : 'user',
-			parts: [{ text }],
+			content: text,
 		})),
-		{ role: 'user', parts: userParts },
+		{ role: 'user', content: userParts },
 	];
 
-	const geminiResponse = await fetch(
-		`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiApiKey}`,
+	const openRouterResponse = await fetch(
+		'https://openrouter.ai/api/v1/chat/completions',
 		{
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${openRouterApiKey}`,
+				'HTTP-Referer': 'http://localhost:3000',
+				'X-Title': 'Docas',
+			},
 			body: JSON.stringify({
-				systemInstruction: {
-					parts: [{ text: 'You are a thoughtful, concise AI assistant. Answer in the same language as the user.' }],
-				},
-				contents,
-				generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+				model: openRouterModel,
+				messages: [
+					{ role: 'system', content: 'You are a thoughtful, concise AI assistant. Answer in the same language as the user.' },
+					...contents.map(({ role, content }) => ({ role: role === 'model' ? 'assistant' : role, content })),
+				],
+				temperature: 0.7,
+				max_tokens: 2048,
 			}),
 		},
 	);
 
-	const data = await geminiResponse.json();
-	if (!geminiResponse.ok) {
-		throw new Error(data.error?.message || 'Gemini API request failed.');
+	const data = await openRouterResponse.json();
+	if (!openRouterResponse.ok) {
+		throw new Error(data.error?.message || 'OpenRouter API request failed.');
 	}
 
-	const text = data.candidates?.[0]?.content?.parts
-		?.map((part) => part.text || '')
-		.join('')
-		.trim();
+	const responseContent = data.choices?.[0]?.message?.content;
+	const text = typeof responseContent === 'string'
+		? responseContent.trim()
+		: responseContent?.map((part) => part.text || '').join('').trim();
 
 	if (!text) {
-		throw new Error('Gemini returned an empty response.');
+		throw new Error('OpenRouter returned an empty response.');
 	}
 	return text;
 }
@@ -225,7 +235,7 @@ async function serveStatic(request, response) {
 const server = createServer(async (request, response) => {
 	try {
 		if (request.method === 'GET' && request.url === '/api/config') {
-			sendJson(response, 200, { configured: Boolean(geminiApiKey), model: geminiModel });
+			sendJson(response, 200, { configured: Boolean(openRouterApiKey), model: openRouterModel });
 			return;
 		}
 
@@ -272,8 +282,8 @@ const server = createServer(async (request, response) => {
 		}
 
 		if (request.method === 'POST' && request.url === '/api/chat') {
-			if (!geminiApiKey) {
-				sendJson(response, 503, { error: 'Chưa cấu hình GEMINI_API_KEY trên server.' });
+			if (!openRouterApiKey) {
+				sendJson(response, 503, { error: 'Chưa cấu hình OPENROUTER_API_KEY trên server.' });
 				return;
 			}
 
@@ -315,7 +325,7 @@ const server = createServer(async (request, response) => {
 				return;
 			}
 
-			const answer = await askGemini(guidedMessage, normalizedHistory, googleAttachment || attachment, link);
+			const answer = await askOpenRouter(guidedMessage, normalizedHistory, googleAttachment || attachment, link);
 			let linkFingerprint = null;
 			try {
 				linkFingerprint = link ? await getGoogleDocumentFingerprint(link) : null;
@@ -338,5 +348,5 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, () => {
 	console.log(`Docas is running at http://localhost:${port}`);
-	if (!geminiApiKey) console.log('Set GEMINI_API_KEY to enable Gemini chat.');
+	if (!openRouterApiKey) console.log('Set OPENROUTER_API_KEY to enable OpenRouter chat.');
 });

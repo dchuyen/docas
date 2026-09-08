@@ -29,8 +29,6 @@ const checkAllDocumentsButton = document.querySelector('#check-all-documents');
 const updateAllDocumentsButton = document.querySelector('#update-all-documents');
 const connectionLabel = document.querySelector('#connection-label');
 const statusDot = document.querySelector('.status-dot');
-const modelName = document.querySelector('#model-name');
-const headerModel = document.querySelector('#header-model');
 const conversationList = document.querySelector('#conversation-list');
 const themeToggle = document.querySelector('#theme-toggle');
 const conversationsStorageKey = 'docas-conversations';
@@ -542,14 +540,11 @@ async function checkConfig() {
     const response = await fetch('/api/config');
     const config = await response.json();
     if (config.configured) {
-      connectionLabel.textContent = 'Gemini đã kết nối';
+      connectionLabel.textContent = 'OpenRouter đã kết nối';
       statusDot.classList.add('ready');
     } else {
       connectionLabel.textContent = 'Chờ API key';
     }
-    const shortModel = config.model.replace(/^gemini-/, 'Gemini ');
-    modelName.textContent = shortModel;
-    headerModel.textContent = shortModel;
   } catch {
     connectionLabel.textContent = 'Server ngoại tuyến';
   }
