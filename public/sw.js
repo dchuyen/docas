@@ -1,4 +1,4 @@
-const CACHE_NAME = 'livingodoc-shell-v10';
+const CACHE_NAME = 'docas-shell-v11';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -28,7 +28,25 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET' || requestUrl.origin !== self.location.origin || requestUrl.pathname.startsWith('/api/')) return;
 
   if (event.request.mode === 'navigate') {
-    event.respondWith(fetch(event.request).catch(() => caches.match('/index.html')));
+    event.respondWith(
+      fetch(new Request(event.request, { cache: 'no-store' }))
+        .catch(() => caches.match('/index.html')),
+    );
+    return;
+  }
+
+  if (APP_SHELL.includes(requestUrl.pathname)) {
+    event.respondWith(
+      fetch(new Request(event.request, { cache: 'no-store' }))
+        .then((response) => {
+          if (response.ok) {
+            const responseCopy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseCopy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request)),
+    );
     return;
   }
 

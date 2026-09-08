@@ -33,9 +33,9 @@ const modelName = document.querySelector('#model-name');
 const headerModel = document.querySelector('#header-model');
 const conversationList = document.querySelector('#conversation-list');
 const themeToggle = document.querySelector('#theme-toggle');
-const conversationsStorageKey = 'livingodoc-conversations';
-const activeConversationStorageKey = 'livingodoc-active-conversation';
-const themeStorageKey = 'livingodoc-theme';
+const conversationsStorageKey = 'docas-conversations';
+const activeConversationStorageKey = 'docas-active-conversation';
+const themeStorageKey = 'docas-theme';
 const documentCheckIntervals = { '15m': 15 * 60 * 1000, '1h': 60 * 60 * 1000, '1d': 24 * 60 * 60 * 1000 };
 const documentCheckTimers = new Map();
 let history = [];
@@ -177,6 +177,13 @@ function readFileAsBase64(file) {
   });
 }
 
+function textToBase64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary);
+}
+
 function clearSelectedLink() {
   selectedLink = '';
   linkInput.value = '';
@@ -216,7 +223,7 @@ function clearDocumentCheckTimers() {
 
 async function updateDocument(itemDocument) {
   try {
-    const response = await fetch('/api/document-status', {
+    const response = await fetch('/api/document-download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ link: itemDocument.url }),
@@ -227,12 +234,16 @@ async function updateDocument(itemDocument) {
     itemDocument.pendingFingerprint = '';
     itemDocument.notifiedFingerprint = itemDocument.fingerprint;
     itemDocument.lastStatus = 'current';
-    input.value = input.value.trim()
-      ? `${input.value.trim()}\n\n🔗 ${itemDocument.url}`
-      : `🔗 ${itemDocument.url}`;
-    input.style.height = 'auto';
-    input.style.height = `${Math.min(input.scrollHeight, 150)}px`;
-    input.focus();
+    saveActiveConversation();
+    renderDocuments();
+    if (updateNowButton.dataset.documentId === itemDocument.id) closeUpdatePopup();
+    await sendMessage(`Tài liệu "${itemDocument.title}" đã được cập nhật. Hãy sử dụng nội dung tài liệu mới này để trả lời các câu hỏi tiếp theo.`, {
+      attachment: {
+        name: data.filename,
+        mimeType: data.mimeType,
+        data: textToBase64(data.content),
+      },
+    });
   } catch (error) {
     itemDocument.lastStatus = 'error';
     itemDocument.lastError = error.message;
@@ -240,9 +251,6 @@ async function updateDocument(itemDocument) {
     renderDocuments();
     return;
   }
-  saveActiveConversation();
-  renderDocuments();
-  if (updateNowButton.dataset.documentId === itemDocument.id) closeUpdatePopup();
 }
 
 async function checkAllDocuments() {
@@ -395,13 +403,126 @@ function setDocumentsModal(open) {
   if (open) modalClose.focus();
 }
 
+function escapeHtml(value) {
+  return value.replace(/[&<>'"]/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;',
+  })[character]);
+}
+
+function renderInlineMarkdown(value) {
+  const codeTokens = [];
+  const escaped = escapeHtml(value).replace(/`([^`\n]+)`/g, (_, code) => {
+    const token = `@@CODE${codeTokens.length}@@`;
+    codeTokens.push(`<code>${code}</code>`);
+    return token;
+  });
+  const linked = escaped.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  const formatted = linked
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
+    .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
+    .replace(/(?<!_)_([^_\n]+)_(?!_)/g, '<em>$1</em>');
+  return formatted.replace(/@@CODE(\d+)@@/g, (_, index) => codeTokens[index]);
+}
+
+function renderMarkdown(value) {
+  const lines = value.replace(/\r\n?/g, '\n').split('\n');
+  const html = [];
+  let paragraph = [];
+  let listType = null;
+  let codeLines = null;
+
+  const closeList = () => {
+    if (listType) {
+      html.push(`</${listType}>`);
+      listType = null;
+    }
+  };
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      html.push(`<p>${paragraph.map(renderInlineMarkdown).join('<br>')}</p>`);
+      paragraph = [];
+    }
+  };
+
+  for (const line of lines) {
+    const fence = line.match(/^\s*```(?:[\w+-]+)?\s*$/);
+    if (fence) {
+      flushParagraph();
+      closeList();
+      if (codeLines) {
+        html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+        codeLines = null;
+      } else {
+        codeLines = [];
+      }
+      continue;
+    }
+    if (codeLines) {
+      codeLines.push(line);
+      continue;
+    }
+    if (!line.trim()) {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+    const heading = line.match(/^\s*(#{1,3})\s+(.+?)\s*#*\s*$/);
+    if (heading) {
+      flushParagraph();
+      closeList();
+      const level = heading[1].length;
+      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+    if (/^\s*(?:---+|\*\s*\*\s*\*|___+)\s*$/.test(line)) {
+      flushParagraph();
+      closeList();
+      html.push('<hr>');
+      continue;
+    }
+    const listItem = line.match(/^\s*([-*+]\s+|\d+[.)]\s+)(.+)$/);
+    if (listItem) {
+      flushParagraph();
+      const nextListType = /^\d/.test(listItem[1]) ? 'ol' : 'ul';
+      if (listType !== nextListType) {
+        closeList();
+        listType = nextListType;
+        html.push(`<${listType}>`);
+      }
+      html.push(`<li>${renderInlineMarkdown(listItem[2])}</li>`);
+      continue;
+    }
+    const quote = line.match(/^\s*>\s?(.*)$/);
+    if (quote) {
+      flushParagraph();
+      closeList();
+      html.push(`<blockquote>${renderInlineMarkdown(quote[1])}</blockquote>`);
+      continue;
+    }
+    closeList();
+    paragraph.push(line);
+  }
+
+  if (codeLines) html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+  flushParagraph();
+  closeList();
+  return html.join('');
+}
+
 function addMessage(role, text, shouldScroll = true) {
   const message = document.createElement('article');
   message.className = `message ${role}`;
   message.innerHTML = role === 'assistant'
-    ? `<div class="avatar">✦</div><div class="message-body"><div class="message-label">Livingodoc</div><div class="message-text"></div></div>`
+    ? `<div class="avatar">✦</div><div class="message-body"><div class="message-label">Docas</div><div class="message-text"></div></div>`
     : '<div class="message-body"><div class="message-text"></div></div>';
-  message.querySelector('.message-text').textContent = text;
+  const messageText = message.querySelector('.message-text');
+  if (role === 'assistant') messageText.innerHTML = renderMarkdown(text);
+  else messageText.textContent = text;
   messagesElement.append(message);
   if (shouldScroll) message.scrollIntoView({ behavior: 'smooth', block: 'end' });
   return message;
@@ -410,7 +531,7 @@ function addMessage(role, text, shouldScroll = true) {
 function addTyping() {
   const message = document.createElement('article');
   message.className = 'message assistant';
-  message.innerHTML = '<div class="avatar">✦</div><div class="message-body"><div class="message-label">Livingodoc</div><div class="typing"><i></i><i></i><i></i></div></div>';
+  message.innerHTML = '<div class="avatar">✦</div><div class="message-body"><div class="message-label">Docas</div><div class="typing"><i></i><i></i><i></i></div></div>';
   messagesElement.append(message);
   message.scrollIntoView({ behavior: 'smooth', block: 'end' });
   return message;
@@ -434,12 +555,12 @@ async function checkConfig() {
   }
 }
 
-async function sendMessage(text) {
+async function sendMessage(text, options = {}) {
   const message = text.trim();
-  if ((!message && !selectedFile && !selectedLink) || sendButton.disabled) return;
+  const file = options.attachment || selectedFile;
+  const link = options.link ?? selectedLink.trim();
+  if ((!message && !file && !link) || sendButton.disabled) return;
   welcomeElement.hidden = true;
-  const file = selectedFile;
-  const link = selectedLink.trim();
   const visibleMessage = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}${link ? `\n\n🔗 ${link}` : ''}`;
   const userMessageElement = addMessage('user', visibleMessage);
   input.value = '';
@@ -449,7 +570,9 @@ async function sendMessage(text) {
   sendButton.disabled = true;
   const typing = addTyping();
   try {
-    const attachment = file ? { name: file.name, mimeType: file.type, data: await readFileAsBase64(file) } : undefined;
+    const attachment = file
+      ? (file.data ? file : { name: file.name, mimeType: file.type, data: await readFileAsBase64(file) })
+      : undefined;
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

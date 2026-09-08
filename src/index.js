@@ -8,7 +8,18 @@ const port = Number(process.env.PORT) || 3000;
 const geminiApiKey = process.env.GEMINI_API_KEY;
 const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const publicDirectory = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public');
+const projectRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const maxAttachmentBytes = 10 * 1024 * 1024;
+
+async function readGuidanceFile() {
+	try {
+		const filePath = join(projectRoot, 'huongdan.txt');
+		return await readFile(filePath, 'utf8');
+	} catch (error) {
+		console.warn('Không tìm thấy hoặc không đọc được huongdan.txt:', error.message);
+		return null;
+	}
+}
 
 const contentTypes = {
 	'.css': 'text/css; charset=utf-8',
@@ -271,6 +282,12 @@ const server = createServer(async (request, response) => {
 				sendJson(response, 400, { error: 'Tin nhắn không được để trống.' });
 				return;
 			}
+			const normalizedHistory = Array.isArray(history) ? history : [];
+			const isFirstMessageInNewChat = normalizedHistory.length === 0;
+			const guidanceText = isFirstMessageInNewChat ? await readGuidanceFile() : null;
+			const guidedMessage = guidanceText
+				? `Hãy làm theo file huongdan.txt dưới đây và tuân thủ nghiêm ngặt các quy định trong đó.\n\n${guidanceText}\n\nYêu cầu của người dùng:\n${message.trim()}`
+				: message.trim();
 			if (attachment) {
 				const allowedTypes = /^(image\/(jpeg|png|webp|gif)|application\/pdf|text\/plain|text\/csv|text\/markdown|application\/json)$/;
 				if (!allowedTypes.test(attachment.mimeType) || typeof attachment.data !== 'string' || attachment.data.length > 14_000_000) {
@@ -298,7 +315,7 @@ const server = createServer(async (request, response) => {
 				return;
 			}
 
-			const answer = await askGemini(message.trim(), Array.isArray(history) ? history : [], googleAttachment || attachment, link);
+			const answer = await askGemini(guidedMessage, normalizedHistory, googleAttachment || attachment, link);
 			let linkFingerprint = null;
 			try {
 				linkFingerprint = link ? await getGoogleDocumentFingerprint(link) : null;
@@ -320,6 +337,6 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, () => {
-	console.log(`Livingodoc is running at http://localhost:${port}`);
+	console.log(`Docas is running at http://localhost:${port}`);
 	if (!geminiApiKey) console.log('Set GEMINI_API_KEY to enable Gemini chat.');
 });

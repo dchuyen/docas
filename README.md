@@ -1,4 +1,4 @@
-# livingodoc
+# docas
 
 Ứng dụng chat AI dùng Gemini API, chạy bằng Node.js thuần.
 
