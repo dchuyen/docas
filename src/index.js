@@ -9,7 +9,6 @@ const openRouterApiKey = process.env.OPENROUTER_API_KEY;
 const openRouterModel = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
 const publicDirectory = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public');
 const projectRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-const maxAttachmentBytes = 10 * 1024 * 1024;
 
 async function readGuidanceFile() {
 	try {
@@ -39,9 +38,6 @@ async function readJson(request) {
 	let body = '';
 	for await (const chunk of request) {
 		body += chunk;
-		if (body.length > 15_000_000) {
-			throw new Error('Request body is too large.');
-		}
 	}
 	return JSON.parse(body || '{}');
 }
@@ -153,10 +149,7 @@ async function getGoogleDocumentContent(link) {
 	if (!fileResponse.ok) {
 		throw new Error('Không thể đọc nội dung Google file. Hãy kiểm tra file đã được chia sẻ công khai chưa.');
 	}
-	const contentLength = Number(fileResponse.headers.get('content-length'));
-	if (contentLength > maxAttachmentBytes) throw new Error('Google file vượt quá giới hạn 10 MB.');
 	const contentBytes = new Uint8Array(await fileResponse.arrayBuffer());
-	if (contentBytes.byteLength > maxAttachmentBytes) throw new Error('Google file vượt quá giới hạn 10 MB.');
 	return { bytes: contentBytes, text: Buffer.from(contentBytes).toString('utf8') };
 }
 
@@ -169,14 +162,7 @@ async function downloadGoogleFile(link) {
 		throw new Error('Không thể tải Google file. Hãy kiểm tra file đã được chia sẻ công khai chưa.');
 	}
 
-	const contentLength = Number(fileResponse.headers.get('content-length'));
-	if (contentLength > maxAttachmentBytes) {
-		throw new Error('Google file vượt quá giới hạn 10 MB.');
-	}
 	const fileBytes = new Uint8Array(await fileResponse.arrayBuffer());
-	if (fileBytes.byteLength > maxAttachmentBytes) {
-		throw new Error('Google file vượt quá giới hạn 10 MB.');
-	}
 
 	const normalizedPdf = Buffer.from(fileBytes).toString('latin1')
 		.replace(/\/CreationDate\s*\([^)]*\)/g, (value) => ' '.repeat(value.length))
@@ -300,8 +286,8 @@ const server = createServer(async (request, response) => {
 				: message.trim();
 			if (attachment) {
 				const allowedTypes = /^(image\/(jpeg|png|webp|gif)|application\/pdf|text\/plain|text\/csv|text\/markdown|application\/json)$/;
-				if (!allowedTypes.test(attachment.mimeType) || typeof attachment.data !== 'string' || attachment.data.length > 14_000_000) {
-					sendJson(response, 400, { error: 'Tệp không hợp lệ hoặc vượt quá giới hạn 10 MB.' });
+				if (!allowedTypes.test(attachment.mimeType) || typeof attachment.data !== 'string') {
+					sendJson(response, 400, { error: 'Tệp không hợp lệ.' });
 					return;
 				}
 			}

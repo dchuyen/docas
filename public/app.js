@@ -619,11 +619,6 @@ document.querySelectorAll('[data-prompt]').forEach((button) => button.addEventLi
 fileInput.addEventListener('change', () => {
   const [file] = fileInput.files;
   if (!file) return;
-  if (file.size > 10 * 1024 * 1024) {
-    addMessage('assistant', 'Tệp quá lớn. Vui lòng chọn tệp nhỏ hơn 10 MB.');
-    clearSelectedFile();
-    return;
-  }
   selectedFile = file;
   fileName.textContent = file.name;
   attachmentPreview.hidden = false;
