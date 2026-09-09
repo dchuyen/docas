@@ -34,8 +34,11 @@ const themeToggle = document.querySelector('#theme-toggle');
 const conversationsStorageKey = 'docas-conversations';
 const activeConversationStorageKey = 'docas-active-conversation';
 const themeStorageKey = 'docas-theme';
+const documentDataDatabaseName = 'docas-document-data';
+const documentDataStoreName = 'documents';
 const documentCheckIntervals = { '15m': 15 * 60 * 1000, '1h': 60 * 60 * 1000, '1d': 24 * 60 * 60 * 1000 };
 const documentCheckTimers = new Map();
+let documentDataDatabasePromise;
 let history = [];
 let selectedFile = null;
 let selectedLink = '';
@@ -241,6 +244,7 @@ async function updateDocument(itemDocument) {
         mimeType: data.mimeType,
         data: textToBase64(data.content),
       },
+      includeStoredLink: false,
     });
   } catch (error) {
     itemDocument.lastStatus = 'error';
@@ -553,10 +557,17 @@ async function checkConfig() {
 async function sendMessage(text, options = {}) {
   const message = text.trim();
   const file = options.attachment || selectedFile;
-  const link = options.link ?? selectedLink.trim();
-  if ((!message && !file && !link) || sendButton.disabled) return;
+  const newLink = options.link ?? selectedLink.trim();
+  const storedLink = [...sentDocuments].reverse().find((itemDocument) => itemDocument.url)?.url || '';
+  const link = newLink || (options.includeStoredLink === false ? '' : storedLink);
+  const storedFileDocument = !file && options.includeStoredLink !== false
+    ? [...sentDocuments].reverse().find((itemDocument) => itemDocument.kind === 'file' && itemDocument.id)
+    : null;
+  const storedFile = storedFileDocument ? await getDocumentData(storedFileDocument.id) : null;
+  const contextFile = file || storedFile;
+  if ((!message && !contextFile && !link) || sendButton.disabled) return;
   welcomeElement.hidden = true;
-  const visibleMessage = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}${link ? `\n\n🔗 ${link}` : ''}`;
+  const visibleMessage = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}${newLink ? `\n\n🔗 ${newLink}` : ''}`;
   const userMessageElement = addMessage('user', visibleMessage);
   input.value = '';
   input.style.height = 'auto';
@@ -565,8 +576,8 @@ async function sendMessage(text, options = {}) {
   sendButton.disabled = true;
   const typing = addTyping();
   try {
-    const attachment = file
-      ? (file.data ? file : { name: file.name, mimeType: file.type, data: await readFileAsBase64(file) })
+    const attachment = contextFile
+      ? (contextFile.data ? contextFile : { name: contextFile.name, mimeType: contextFile.type, data: await readFileAsBase64(contextFile) })
       : undefined;
     const response = await fetch('/api/chat', {
       method: 'POST',
@@ -576,12 +587,19 @@ async function sendMessage(text, options = {}) {
     const data = await response.json();
     typing.remove();
     if (!response.ok) throw new Error(data.error || 'Không thể gửi tin nhắn.');
-    if (link && data.linkTitle) {
+    if (newLink && data.linkTitle) {
       userMessageElement.querySelector('.message-text').textContent = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}\n\n🔗 ${data.linkTitle}`;
     }
-    if (file) sentDocuments.push({ kind: 'file', title: file.name, name: file.type || 'Tệp' });
-    if (link) sentDocuments.push({ kind: 'link', title: data.linkTitle || 'Liên kết tài liệu', name: link, url: link, fingerprint: data.linkFingerprint, fingerprintFormat: 'text-v1', checkFrequency: 'off', lastStatus: 'unchecked' });
+    let fileDocument = null;
+    if (file) {
+      fileDocument = { kind: 'file', title: file.name, name: file.type || 'Tệp' };
+      sentDocuments.push(fileDocument);
+    }
+    if (newLink && !sentDocuments.some((itemDocument) => itemDocument.url === newLink)) {
+      sentDocuments.push({ kind: 'link', title: data.linkTitle || 'Liên kết tài liệu', name: newLink, url: newLink, fingerprint: data.linkFingerprint, fingerprintFormat: 'text-v1', checkFrequency: 'off', lastStatus: 'unchecked' });
+    }
     renderDocuments();
+    if (fileDocument && attachment) await saveDocumentData(fileDocument.id, attachment);
     addMessage('assistant', data.answer);
     history.push({ role: 'user', text: visibleMessage }, { role: 'assistant', text: data.answer });
     saveActiveConversation();
@@ -620,7 +638,8 @@ linkInput.addEventListener('input', () => { selectedLink = linkInput.value; });
 linkType.addEventListener('change', () => { linkInput.placeholder = `Dán liên kết ${linkType.value === 'document' ? 'Google Docs' : 'Google Sheets'}...`; });
 document.addEventListener('click', (event) => { if (!attachmentMenu.contains(event.target) && event.target !== attachButton) setAttachmentMenu(false); });
 document.querySelector('#new-chat').addEventListener('click', startNewConversation);
-document.querySelector('#clear-chat').addEventListener('click', () => {
+document.querySelector('#clear-chat').addEventListener('click', async () => {
+  await deleteDocumentData(sentDocuments.map((itemDocument) => itemDocument.id).filter(Boolean));
   history = [];
   sentDocuments = [];
   clearSelectedFile();
@@ -673,4 +692,67 @@ checkConfig();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+}
+
+function openDocumentDataDatabase() {
+  if (documentDataDatabasePromise) return documentDataDatabasePromise;
+  documentDataDatabasePromise = new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) {
+      reject(new Error('IndexedDB không khả dụng trên thiết bị này.'));
+      return;
+    }
+    const request = indexedDB.open(documentDataDatabaseName, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(documentDataStoreName, { keyPath: 'id' });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Không thể mở kho dữ liệu tài liệu.'));
+  });
+  return documentDataDatabasePromise;
+}
+
+async function saveDocumentData(documentId, data) {
+  if (!documentId || !data?.data) return;
+  try {
+    const database = await openDocumentDataDatabase();
+    await new Promise((resolve, reject) => {
+      const request = database.transaction(documentDataStoreName, 'readwrite')
+        .objectStore(documentDataStoreName)
+        .put({ id: documentId, name: data.name, mimeType: data.mimeType, data: data.data });
+      request.onsuccess = resolve;
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    connectionLabel.textContent = 'Không thể lưu nội dung tài liệu';
+  }
+}
+
+async function getDocumentData(documentId) {
+  if (!documentId) return null;
+  try {
+    const database = await openDocumentDataDatabase();
+    return await new Promise((resolve, reject) => {
+      const request = database.transaction(documentDataStoreName, 'readonly')
+        .objectStore(documentDataStoreName)
+        .get(documentId);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function deleteDocumentData(documentIds) {
+  if (!documentIds.length) return;
+  try {
+    const database = await openDocumentDataDatabase();
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(documentDataStoreName, 'readwrite');
+      const store = transaction.objectStore(documentDataStoreName);
+      documentIds.forEach((documentId) => store.delete(documentId));
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } catch {
+    // localStorage data remains authoritative if IndexedDB is unavailable.
+  }
 }
