@@ -1,3 +1,6 @@
+import { normalizeAssistantText, renderMarkdown } from './modules/markdown.js';
+import { deleteDocumentData, getDocumentData, saveDocumentData } from './modules/document-storage.js';
+
 const messagesElement = document.querySelector('#messages');
 const welcomeElement = document.querySelector('#welcome');
 const composer = document.querySelector('#composer');
@@ -31,14 +34,12 @@ const connectionLabel = document.querySelector('#connection-label');
 const statusDot = document.querySelector('.status-dot');
 const conversationList = document.querySelector('#conversation-list');
 const themeToggle = document.querySelector('#theme-toggle');
+const webSearchToggle = document.querySelector('#web-search-toggle');
 const conversationsStorageKey = 'docas-conversations';
 const activeConversationStorageKey = 'docas-active-conversation';
 const themeStorageKey = 'docas-theme';
-const documentDataDatabaseName = 'docas-document-data';
-const documentDataStoreName = 'documents';
 const documentCheckIntervals = { '15m': 15 * 60 * 1000, '1h': 60 * 60 * 1000, '1d': 24 * 60 * 60 * 1000 };
 const documentCheckTimers = new Map();
-let documentDataDatabasePromise;
 let history = [];
 let selectedFile = null;
 let selectedLink = '';
@@ -373,9 +374,7 @@ function renderDocuments() {
         itemDocument.lastStatus = 'unchecked';
         persistConversations();
         renderDocuments();
-        if (frequency.value !== 'off') {
-          checkDocumentUpdates(itemDocument, document.querySelector(`[data-document-id="${itemDocument.id}"] .document-status`));
-        }
+        if (frequency.value !== 'off') checkDocumentUpdates(itemDocument, document.querySelector(`[data-document-id="${itemDocument.id}"] .document-status`));
       });
       const status = document.createElement('small');
       status.className = 'document-status';
@@ -405,126 +404,16 @@ function setDocumentsModal(open) {
   if (open) modalClose.focus();
 }
 
-function escapeHtml(value) {
-  return value.replace(/[&<>'"]/g, (character) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    "'": '&#39;',
-    '"': '&quot;',
-  })[character]);
-}
-
-function renderInlineMarkdown(value) {
-  const codeTokens = [];
-  const escaped = escapeHtml(value).replace(/`([^`\n]+)`/g, (_, code) => {
-    const token = `@@CODE${codeTokens.length}@@`;
-    codeTokens.push(`<code>${code}</code>`);
-    return token;
-  });
-  const linked = escaped.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-  const formatted = linked
-    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
-    .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
-    .replace(/(?<!_)_([^_\n]+)_(?!_)/g, '<em>$1</em>');
-  return formatted.replace(/@@CODE(\d+)@@/g, (_, index) => codeTokens[index]);
-}
-
-function renderMarkdown(value) {
-  const lines = value.replace(/\r\n?/g, '\n').split('\n');
-  const html = [];
-  let paragraph = [];
-  let listType = null;
-  let codeLines = null;
-
-  const closeList = () => {
-    if (listType) {
-      html.push(`</${listType}>`);
-      listType = null;
-    }
-  };
-  const flushParagraph = () => {
-    if (paragraph.length) {
-      html.push(`<p>${paragraph.map(renderInlineMarkdown).join('<br>')}</p>`);
-      paragraph = [];
-    }
-  };
-
-  for (const line of lines) {
-    const fence = line.match(/^\s*```(?:[\w+-]+)?\s*$/);
-    if (fence) {
-      flushParagraph();
-      closeList();
-      if (codeLines) {
-        html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
-        codeLines = null;
-      } else {
-        codeLines = [];
-      }
-      continue;
-    }
-    if (codeLines) {
-      codeLines.push(line);
-      continue;
-    }
-    if (!line.trim()) {
-      flushParagraph();
-      closeList();
-      continue;
-    }
-    const heading = line.match(/^\s*(#{1,3})\s+(.+?)\s*#*\s*$/);
-    if (heading) {
-      flushParagraph();
-      closeList();
-      const level = heading[1].length;
-      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
-      continue;
-    }
-    if (/^\s*(?:---+|\*\s*\*\s*\*|___+)\s*$/.test(line)) {
-      flushParagraph();
-      closeList();
-      html.push('<hr>');
-      continue;
-    }
-    const listItem = line.match(/^\s*([-*+]\s+|\d+[.)]\s+)(.+)$/);
-    if (listItem) {
-      flushParagraph();
-      const nextListType = /^\d/.test(listItem[1]) ? 'ol' : 'ul';
-      if (listType !== nextListType) {
-        closeList();
-        listType = nextListType;
-        html.push(`<${listType}>`);
-      }
-      html.push(`<li>${renderInlineMarkdown(listItem[2])}</li>`);
-      continue;
-    }
-    const quote = line.match(/^\s*>\s?(.*)$/);
-    if (quote) {
-      flushParagraph();
-      closeList();
-      html.push(`<blockquote>${renderInlineMarkdown(quote[1])}</blockquote>`);
-      continue;
-    }
-    closeList();
-    paragraph.push(line);
-  }
-
-  if (codeLines) html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
-  flushParagraph();
-  closeList();
-  return html.join('');
-}
-
 function addMessage(role, text, shouldScroll = true) {
+  const normalizedText = role === 'assistant' ? normalizeAssistantText(text) : text;
   const message = document.createElement('article');
   message.className = `message ${role}`;
   message.innerHTML = role === 'assistant'
     ? `<div class="avatar">✦</div><div class="message-body"><div class="message-label">Docas</div><div class="message-text"></div></div>`
     : '<div class="message-body"><div class="message-text"></div></div>';
   const messageText = message.querySelector('.message-text');
-  if (role === 'assistant') messageText.innerHTML = renderMarkdown(text);
-  else messageText.textContent = text;
+  if (role === 'assistant') messageText.innerHTML = renderMarkdown(normalizedText);
+  else messageText.textContent = normalizedText;
   messagesElement.append(message);
   if (shouldScroll) message.scrollIntoView({ behavior: 'smooth', block: 'end' });
   return message;
@@ -543,8 +432,11 @@ async function checkConfig() {
   try {
     const response = await fetch('/api/config');
     const config = await response.json();
-    if (config.configured) {
-      connectionLabel.textContent = 'OpenRouter đã kết nối';
+    if (config.configured && config.tavilyConfigured) {
+      connectionLabel.textContent = 'AI và tìm web đã kết nối';
+      statusDot.classList.add('ready');
+    } else if (config.configured) {
+      connectionLabel.textContent = 'OpenRouter đã kết nối · Thiếu Tavily';
       statusDot.classList.add('ready');
     } else {
       connectionLabel.textContent = 'Chờ API key';
@@ -557,6 +449,7 @@ async function checkConfig() {
 async function sendMessage(text, options = {}) {
   const message = text.trim();
   const file = options.attachment || selectedFile;
+  const webSearch = options.webSearch ?? webSearchToggle.checked;
   const newLink = options.link ?? selectedLink.trim();
   const storedLink = [...sentDocuments].reverse().find((itemDocument) => itemDocument.url)?.url || '';
   const link = newLink || (options.includeStoredLink === false ? '' : storedLink);
@@ -567,7 +460,7 @@ async function sendMessage(text, options = {}) {
   const contextFile = file || storedFile;
   if ((!message && !contextFile && !link) || sendButton.disabled) return;
   welcomeElement.hidden = true;
-  const visibleMessage = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}${newLink ? `\n\n🔗 ${newLink}` : ''}`;
+  const visibleMessage = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}${newLink ? `\n\n🔗 ${newLink}` : ''}${webSearch ? '\n\n⌕ Tìm kiếm web' : ''}`;
   const userMessageElement = addMessage('user', visibleMessage);
   input.value = '';
   input.style.height = 'auto';
@@ -582,13 +475,16 @@ async function sendMessage(text, options = {}) {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: message || 'Hãy phân tích nội dung đính kèm.', history, attachment, link: link || undefined }),
+      body: JSON.stringify({ message: message || 'Hãy phân tích nội dung đính kèm.', history, attachment, link: link || undefined, webSearch }),
     });
     const data = await response.json();
     typing.remove();
-    if (!response.ok) throw new Error(data.error || 'Không thể gửi tin nhắn.');
+    if (!response.ok) {
+      const errorMessage = typeof data.error === 'string' ? data.error : data.error?.message || 'Không thể gửi tin nhắn.';
+      throw new Error(errorMessage);
+    }
     if (newLink && data.linkTitle) {
-      userMessageElement.querySelector('.message-text').textContent = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}\n\n🔗 ${data.linkTitle}`;
+      userMessageElement.querySelector('.message-text').textContent = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}\n\n🔗 ${data.linkTitle}${webSearch ? '\n\n⌕ Tìm kiếm web' : ''}`;
     }
     let fileDocument = null;
     if (file) {
@@ -687,67 +583,4 @@ checkConfig();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
-}
-
-function openDocumentDataDatabase() {
-  if (documentDataDatabasePromise) return documentDataDatabasePromise;
-  documentDataDatabasePromise = new Promise((resolve, reject) => {
-    if (!('indexedDB' in window)) {
-      reject(new Error('IndexedDB không khả dụng trên thiết bị này.'));
-      return;
-    }
-    const request = indexedDB.open(documentDataDatabaseName, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(documentDataStoreName, { keyPath: 'id' });
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error('Không thể mở kho dữ liệu tài liệu.'));
-  });
-  return documentDataDatabasePromise;
-}
-
-async function saveDocumentData(documentId, data) {
-  if (!documentId || !data?.data) return;
-  try {
-    const database = await openDocumentDataDatabase();
-    await new Promise((resolve, reject) => {
-      const request = database.transaction(documentDataStoreName, 'readwrite')
-        .objectStore(documentDataStoreName)
-        .put({ id: documentId, name: data.name, mimeType: data.mimeType, data: data.data });
-      request.onsuccess = resolve;
-      request.onerror = () => reject(request.error);
-    });
-  } catch {
-    connectionLabel.textContent = 'Không thể lưu nội dung tài liệu';
-  }
-}
-
-async function getDocumentData(documentId) {
-  if (!documentId) return null;
-  try {
-    const database = await openDocumentDataDatabase();
-    return await new Promise((resolve, reject) => {
-      const request = database.transaction(documentDataStoreName, 'readonly')
-        .objectStore(documentDataStoreName)
-        .get(documentId);
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error);
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function deleteDocumentData(documentIds) {
-  if (!documentIds.length) return;
-  try {
-    const database = await openDocumentDataDatabase();
-    await new Promise((resolve, reject) => {
-      const transaction = database.transaction(documentDataStoreName, 'readwrite');
-      const store = transaction.objectStore(documentDataStoreName);
-      documentIds.forEach((documentId) => store.delete(documentId));
-      transaction.oncomplete = resolve;
-      transaction.onerror = () => reject(transaction.error);
-    });
-  } catch {
-    // localStorage data remains authoritative if IndexedDB is unavailable.
-  }
 }

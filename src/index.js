@@ -3,9 +3,12 @@ import { createHash } from 'node:crypto';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
+import { askOpenRouter, searchTavily } from './services/ai-provider.js';
+import { downloadGoogleFile, getGoogleDocumentContent, getGoogleDocumentFingerprint, getGoogleFileTitle, googleExportUrl } from './services/google-documents.js';
 
 const port = Number(process.env.PORT) || 3000;
 const openRouterApiKey = process.env.OPENROUTER_API_KEY;
+const tavilyApiKey = process.env.TAVILY_API_KEY;
 const openRouterModel = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
 const publicDirectory = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public');
 const projectRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -42,163 +45,6 @@ async function readJson(request) {
 	return JSON.parse(body || '{}');
 }
 
-function createAttachmentPart(attachment) {
-	if (attachment.mimeType.startsWith('image/')) {
-		return { type: 'image_url', image_url: { url: `data:${attachment.mimeType};base64,${attachment.data}` } };
-	}
-	if (attachment.mimeType === 'application/pdf') {
-		return { type: 'file', file: { filename: attachment.name || 'attachment.pdf', file_data: `data:application/pdf;base64,${attachment.data}` } };
-	}
-	return { type: 'text', text: `\n\nNội dung tệp ${attachment.name || 'đính kèm'}:\n${Buffer.from(attachment.data, 'base64').toString('utf8')}` };
-}
-
-async function askOpenRouter(message, history, attachment, link) {
-	const userParts = [{ type: 'text', text: message }];
-	if (attachment) userParts.push(createAttachmentPart(attachment));
-	if (link) {
-		userParts.push({ type: 'text', text: `Liên kết người dùng đính kèm: ${link}\nHãy sử dụng liên kết này làm ngữ cảnh nếu phù hợp.` });
-	}
-
-	const contents = [
-		...history.slice(-20).map(({ role, text }) => ({
-			role: role === 'assistant' ? 'model' : 'user',
-			content: text,
-		})),
-		{ role: 'user', content: userParts },
-	];
-
-	const openRouterResponse = await fetch(
-		'https://openrouter.ai/api/v1/chat/completions',
-		{
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${openRouterApiKey}`,
-				'HTTP-Referer': 'http://localhost:3000',
-				'X-Title': 'Docas',
-			},
-			body: JSON.stringify({
-				model: openRouterModel,
-				messages: [
-					{ role: 'system', content: 'You are a thoughtful, concise AI assistant. Answer in the same language as the user.' },
-					...contents.map(({ role, content }) => ({ role: role === 'model' ? 'assistant' : role, content })),
-				],
-				temperature: 0.7,
-				max_tokens: 2048,
-			}),
-		},
-	);
-
-	const data = await openRouterResponse.json();
-	if (!openRouterResponse.ok) {
-		throw new Error(data.error?.message || 'OpenRouter API request failed.');
-	}
-
-	const responseContent = data.choices?.[0]?.message?.content;
-	const text = typeof responseContent === 'string'
-		? responseContent.trim()
-		: responseContent?.map((part) => part.text || '').join('').trim();
-
-	if (!text) {
-		throw new Error('OpenRouter returned an empty response.');
-	}
-	return text;
-}
-
-function googleExportUrl(link) {
-	try {
-		const parsedLink = new URL(link);
-		const host = parsedLink.hostname.toLowerCase();
-		const pathParts = parsedLink.pathname.split('/');
-		const fileType = host === 'docs.google.com' && pathParts[1] === 'document'
-			? 'document'
-			: host === 'docs.google.com' && pathParts[1] === 'spreadsheets'
-				? 'spreadsheet'
-				: null;
-		if (!fileType || pathParts[2] !== 'd' || !pathParts[3]) return null;
-
-		const exportFormat = 'pdf';
-		return {
-			url: `https://docs.google.com/${fileType === 'document' ? 'document' : 'spreadsheets'}/d/${pathParts[3]}/export?format=${exportFormat}`,
-			name: `${fileType === 'document' ? 'google-doc' : 'google-sheet'}-${pathParts[3]}.pdf`,
-			fileType,
-			fileId: pathParts[3],
-		};
-	} catch {
-		return null;
-	}
-}
-
-function googleStatusExportUrl(link) {
-	const exportDetails = googleExportUrl(link);
-	if (!exportDetails) return null;
-	const fileType = exportDetails.fileType === 'document' ? 'document' : 'spreadsheets';
-	const format = fileType === 'document' ? 'txt' : 'csv';
-	return `https://docs.google.com/${fileType}/d/${exportDetails.fileId}/export?format=${format}`;
-}
-
-async function getGoogleDocumentFingerprint(link) {
-	const documentContent = await getGoogleDocumentContent(link);
-	return createHash('sha256').update(documentContent.bytes).digest('hex');
-}
-
-async function getGoogleDocumentContent(link) {
-	const statusUrl = googleStatusExportUrl(link);
-	if (!statusUrl) return null;
-	const fileResponse = await fetch(statusUrl, { signal: AbortSignal.timeout(15_000) });
-	if (!fileResponse.ok) {
-		throw new Error('Không thể đọc nội dung Google file. Hãy kiểm tra file đã được chia sẻ công khai chưa.');
-	}
-	const contentBytes = new Uint8Array(await fileResponse.arrayBuffer());
-	return { bytes: contentBytes, text: Buffer.from(contentBytes).toString('utf8') };
-}
-
-async function downloadGoogleFile(link) {
-	const exportDetails = googleExportUrl(link);
-	if (!exportDetails) return null;
-
-	const fileResponse = await fetch(exportDetails.url, { signal: AbortSignal.timeout(15_000) });
-	if (!fileResponse.ok) {
-		throw new Error('Không thể tải Google file. Hãy kiểm tra file đã được chia sẻ công khai chưa.');
-	}
-
-	const fileBytes = new Uint8Array(await fileResponse.arrayBuffer());
-
-	const normalizedPdf = Buffer.from(fileBytes).toString('latin1')
-		.replace(/\/CreationDate\s*\([^)]*\)/g, (value) => ' '.repeat(value.length))
-		.replace(/\/ModDate\s*\([^)]*\)/g, (value) => ' '.repeat(value.length))
-		.replace(/\/ID\s*\[\s*<[^>]*>\s*<[^>]*>\s*\]/g, (value) => ' '.repeat(value.length));
-
-	return {
-		name: exportDetails.name,
-		mimeType: 'application/pdf',
-		data: Buffer.from(fileBytes).toString('base64'),
-		fingerprint: createHash('sha256').update(normalizedPdf, 'latin1').digest('hex'),
-	};
-}
-
-async function getGoogleFileTitle(link) {
-	const exportDetails = googleExportUrl(link);
-	if (!exportDetails) return null;
-	const fallbackTitle = exportDetails.name.startsWith('google-doc') ? 'Google Docs' : 'Google Sheets';
-
-	try {
-		const pageResponse = await fetch(link, { signal: AbortSignal.timeout(10_000) });
-		if (!pageResponse.ok) return fallbackTitle;
-		const html = await pageResponse.text();
-		const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-		const title = titleMatch?.[1]
-			?.replace(/&amp;/g, '&')
-			.replace(/&#39;/g, "'")
-			.replace(/&quot;/g, '"')
-			.replace(/\s+-\s+Google (Docs|Sheets)$/i, '')
-			.trim();
-		return title || fallbackTitle;
-	} catch {
-		return fallbackTitle;
-	}
-}
-
 async function serveStatic(request, response) {
 	const requestedPath = request.url === '/' ? '/index.html' : new URL(request.url, 'http://localhost').pathname;
 	const filePath = normalize(join(publicDirectory, requestedPath));
@@ -221,7 +67,7 @@ async function serveStatic(request, response) {
 const server = createServer(async (request, response) => {
 	try {
 		if (request.method === 'GET' && request.url === '/api/config') {
-			sendJson(response, 200, { configured: Boolean(openRouterApiKey), model: openRouterModel });
+			sendJson(response, 200, { configured: Boolean(openRouterApiKey), tavilyConfigured: Boolean(tavilyApiKey), model: openRouterModel });
 			return;
 		}
 
@@ -273,7 +119,7 @@ const server = createServer(async (request, response) => {
 				return;
 			}
 
-			const { message, history = [], attachment, link } = await readJson(request);
+			const { message, history = [], attachment, link, webSearch = false } = await readJson(request);
 			if (typeof message !== 'string' || !message.trim()) {
 				sendJson(response, 400, { error: 'Tin nhắn không được để trống.' });
 				return;
@@ -303,6 +149,15 @@ const server = createServer(async (request, response) => {
 			}
 			let googleAttachment = null;
 			let linkTitle = null;
+			let webSources = [];
+			if (webSearch) {
+				try {
+					webSources = await searchTavily(message.trim(), tavilyApiKey);
+				} catch (error) {
+					sendJson(response, 422, { error: error.message || 'Không thể tìm kiếm trên web.' });
+					return;
+				}
+			}
 			try {
 				googleAttachment = link ? await downloadGoogleFile(link) : null;
 				linkTitle = link ? await getGoogleFileTitle(link) : null;
@@ -311,12 +166,20 @@ const server = createServer(async (request, response) => {
 				return;
 			}
 
-			const answer = await askOpenRouter(guidedMessage, normalizedHistory, googleAttachment || attachment, link);
+			const answer = await askOpenRouter({
+				message: guidedMessage,
+				history: normalizedHistory,
+				attachment: googleAttachment || attachment,
+				link,
+				webSources,
+				apiKey: openRouterApiKey,
+				model: openRouterModel,
+			});
 			let linkFingerprint = null;
 			try {
 				linkFingerprint = link ? await getGoogleDocumentFingerprint(link) : null;
 			} catch { }
-			sendJson(response, 200, { answer, linkTitle, linkFingerprint });
+			sendJson(response, 200, { answer, linkTitle, linkFingerprint, webSources: webSources.map(({ title, url, publishedDate }) => ({ title, url, publishedDate })) });
 			return;
 		}
 
