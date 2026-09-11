@@ -26,7 +26,7 @@ async function searchTavily(query, apiKey) {
 		body: JSON.stringify({
 			api_key: apiKey,
 			query,
-			search_depth: 'advanced',
+			search_depth: 'basic',
 			max_results: 5,
 			include_answer: false,
 			include_raw_content: false,
