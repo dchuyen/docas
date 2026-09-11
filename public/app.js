@@ -433,10 +433,10 @@ async function checkConfig() {
     const response = await fetch('/api/config');
     const config = await response.json();
     if (config.configured && config.tavilyConfigured) {
-      connectionLabel.textContent = 'AI và tìm web đã kết nối';
+      connectionLabel.textContent = `${config.model || 'AI'} · Tìm web đã sẵn sàng`;
       statusDot.classList.add('ready');
     } else if (config.configured) {
-      connectionLabel.textContent = 'OpenRouter đã kết nối · Thiếu Tavily';
+      connectionLabel.textContent = `${config.model || 'AI'} · Tìm web chưa sẵn sàng`;
       statusDot.classList.add('ready');
     } else {
       connectionLabel.textContent = 'Chờ API key';

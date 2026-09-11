@@ -3,13 +3,13 @@ import { createHash } from 'node:crypto';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
-import { askOpenRouter, searchTavily } from './services/ai-provider.js';
+import { askGroq, searchTavily } from './services/ai-provider.js';
 import { downloadGoogleFile, getGoogleDocumentContent, getGoogleDocumentFingerprint, getGoogleFileTitle, googleExportUrl } from './services/google-documents.js';
 
 const port = Number(process.env.PORT) || 3000;
-const openRouterApiKey = process.env.OPENROUTER_API_KEY;
+const groqApiKey = process.env.GROQ_API_KEY;
 const tavilyApiKey = process.env.TAVILY_API_KEY;
-const openRouterModel = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
+const groqModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 const publicDirectory = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public');
 const projectRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -67,7 +67,7 @@ async function serveStatic(request, response) {
 const server = createServer(async (request, response) => {
 	try {
 		if (request.method === 'GET' && request.url === '/api/config') {
-			sendJson(response, 200, { configured: Boolean(openRouterApiKey), tavilyConfigured: Boolean(tavilyApiKey), model: openRouterModel });
+			sendJson(response, 200, { configured: Boolean(groqApiKey), tavilyConfigured: Boolean(tavilyApiKey), model: groqModel });
 			return;
 		}
 
@@ -114,8 +114,8 @@ const server = createServer(async (request, response) => {
 		}
 
 		if (request.method === 'POST' && request.url === '/api/chat') {
-			if (!openRouterApiKey) {
-				sendJson(response, 503, { error: 'Chưa cấu hình OPENROUTER_API_KEY trên server.' });
+			if (!groqApiKey) {
+				sendJson(response, 503, { error: 'Chưa cấu hình GROQ_API_KEY trên server.' });
 				return;
 			}
 
@@ -166,14 +166,14 @@ const server = createServer(async (request, response) => {
 				return;
 			}
 
-			const answer = await askOpenRouter({
+			const answer = await askGroq({
 				message: guidedMessage,
 				history: normalizedHistory,
 				attachment: googleAttachment || attachment,
 				link,
 				webSources,
-				apiKey: openRouterApiKey,
-				model: openRouterModel,
+				apiKey: groqApiKey,
+				model: groqModel,
 			});
 			let linkFingerprint = null;
 			try {
@@ -197,5 +197,5 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, () => {
 	console.log(`Docas is running at http://localhost:${port}`);
-	if (!openRouterApiKey) console.log('Set OPENROUTER_API_KEY to enable OpenRouter chat.');
+	if (!groqApiKey) console.log('Set GROQ_API_KEY to enable Groq chat.');
 });

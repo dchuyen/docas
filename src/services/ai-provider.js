@@ -53,7 +53,7 @@ function formatWebSources(sources) {
 	].filter(Boolean).join('\n')).join('\n\n');
 }
 
-export async function askOpenRouter({ message, history, attachment, link, webSources = [], apiKey, model }) {
+export async function askGroq({ message, history, attachment, link, webSources = [], apiKey, model }) {
 	const userParts = [{ type: 'text', text: message }];
 	if (attachment) userParts.push(createAttachmentPart(attachment));
 	if (link) {
@@ -74,13 +74,11 @@ export async function askOpenRouter({ message, history, attachment, link, webSou
 		{ role: 'user', content: userParts },
 	];
 
-	const openRouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+	const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
 			Authorization: `Bearer ${apiKey}`,
-			'HTTP-Referer': 'http://localhost:3000',
-			'X-Title': 'Docas',
 		},
 		body: JSON.stringify({
 			model,
@@ -93,14 +91,14 @@ export async function askOpenRouter({ message, history, attachment, link, webSou
 		}),
 	});
 
-	const data = await openRouterResponse.json();
-	if (!openRouterResponse.ok) throw new Error(data.error?.message || 'OpenRouter API request failed.');
+	const data = await groqResponse.json();
+	if (!groqResponse.ok) throw new Error(data.error?.message || 'Groq API request failed.');
 
 	const responseContent = data.choices?.[0]?.message?.content;
 	const text = typeof responseContent === 'string'
 		? responseContent.trim()
 		: responseContent?.map((part) => part.text || '').join('').trim();
-	if (!text) throw new Error('OpenRouter returned an empty response.');
+	if (!text) throw new Error('Groq returned an empty response.');
 	return text;
 }
 

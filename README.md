@@ -2,7 +2,7 @@
 
 # docas
 
-Ứng dụng chat AI dùng OpenRouter API và Tavily, chạy bằng Node.js thuần.
+Ứng dụng chat AI dùng Groq API và Tavily, chạy bằng Node.js thuần.
 
 ## Cấu hình
 
@@ -10,7 +10,7 @@
 2. Thêm API key:
 
 ```env
-OPENROUTER_API_KEY=your_openrouter_api_key
+GROQ_API_KEY=your_groq_api_key
 TAVILY_API_KEY=your_tavily_api_key
 ```
 
@@ -30,6 +30,6 @@ npm run dev
 
 Mở `http://localhost:3000` trong trình duyệt. API key chỉ được dùng ở backend và không được gửi vào frontend.
 
-Bạn có thể đính kèm tệp trực tiếp hoặc dán link Google Docs/Google Sheets. Google file cần được chia sẻ với quyền `Anyone with the link`; server sẽ tải bản PDF export tạm thời và gửi cho OpenRouter, không lưu file xuống ổ đĩa.
+Bạn có thể đính kèm tệp trực tiếp hoặc dán link Google Docs/Google Sheets. Google file cần được chia sẻ với quyền `Anyone with the link`; server sẽ tải bản PDF export tạm thời và gửi cho Groq, không lưu file xuống ổ đĩa.
 
-Khi bật **Tìm web**, Docas gửi câu hỏi tới Tavily, lấy tối đa 5 nguồn phù hợp rồi nhờ OpenRouter tổng hợp câu trả lời kèm liên kết dẫn nguồn.
+Khi bật **Tìm web**, Docas gửi câu hỏi tới Tavily, lấy tối đa 5 nguồn phù hợp rồi nhờ Groq tổng hợp câu trả lời kèm liên kết dẫn nguồn.
