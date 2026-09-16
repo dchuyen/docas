@@ -35,9 +35,11 @@ const statusDot = document.querySelector('.status-dot');
 const conversationList = document.querySelector('#conversation-list');
 const themeToggle = document.querySelector('#theme-toggle');
 const webSearchToggle = document.querySelector('#web-search-toggle');
+const modelSelector = document.querySelector('#model-selector');
 const conversationsStorageKey = 'docas-conversations';
 const activeConversationStorageKey = 'docas-active-conversation';
 const themeStorageKey = 'docas-theme';
+const groqModelStorageKey = 'docas-groq-model';
 const documentCheckIntervals = { '15m': 15 * 60 * 1000, '1h': 60 * 60 * 1000, '1d': 24 * 60 * 60 * 1000 };
 const documentCheckTimers = new Map();
 let history = [];
@@ -428,10 +430,23 @@ function addTyping() {
   return message;
 }
 
+async function applyModelOptions(config) {
+  if (!modelSelector) return;
+  const availableModels = Array.isArray(config?.availableModels) && config.availableModels.length
+    ? config.availableModels
+    : [config?.model || 'llama-3.3-70b-versatile'];
+  const savedModel = localStorage.getItem(groqModelStorageKey) || config?.model || availableModels[0];
+  const validModel = availableModels.includes(savedModel) ? savedModel : availableModels[0];
+  modelSelector.innerHTML = availableModels.map((modelName) => `<option value="${modelName}">${modelName.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())}</option>`).join('');
+  modelSelector.value = validModel;
+  localStorage.setItem(groqModelStorageKey, validModel);
+}
+
 async function checkConfig() {
   try {
     const response = await fetch('/api/config');
     const config = await response.json();
+    applyModelOptions(config);
     if (config.configured && config.tavilyConfigured) {
       connectionLabel.textContent = `${config.model || 'AI'} · Tìm web đã sẵn sàng`;
       statusDot.classList.add('ready');
@@ -475,7 +490,14 @@ async function sendMessage(text, options = {}) {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: message || 'Hãy phân tích nội dung đính kèm.', history, attachment, link: link || undefined, webSearch }),
+      body: JSON.stringify({
+        message: message || 'Hãy phân tích nội dung đính kèm.',
+        history,
+        attachment,
+        link: link || undefined,
+        webSearch,
+        model: modelSelector?.value || localStorage.getItem(groqModelStorageKey) || undefined,
+      }),
     });
     const data = await response.json();
     typing.remove();
@@ -508,6 +530,9 @@ async function sendMessage(text, options = {}) {
   }
 }
 
+modelSelector?.addEventListener('change', () => {
+  localStorage.setItem(groqModelStorageKey, modelSelector.value);
+});
 composer.addEventListener('submit', (event) => { event.preventDefault(); sendMessage(input.value); });
 input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 150)}px`; });
 input.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); } });

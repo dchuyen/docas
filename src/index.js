@@ -10,9 +10,46 @@ import { downloadGoogleFile, getGoogleDocumentContent, getGoogleDocumentFingerpr
 const port = Number(process.env.PORT) || 3000;
 const groqApiKey = process.env.GROQ_API_KEY;
 const tavilyApiKey = process.env.TAVILY_API_KEY;
-const groqModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const fallbackGroqModels = [
+	'llama-3.3-70b-versatile',
+	'llama-3.1-70b-versatile',
+	'llama-3.1-8b-instant',
+	'mixtral-8x7b-32768',
+	'gemma2-9b-it',
+	'deepseek-r1-distill-llama-70b',
+];
+const defaultGroqModel = process.env.GROQ_MODEL || fallbackGroqModels[0];
+const groqModelCache = { value: null, expiresAt: 0 };
 const publicDirectory = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public');
 const projectRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+
+async function getGroqAvailableModels() {
+	if (!groqApiKey) return fallbackGroqModels;
+	const now = Date.now();
+	if (groqModelCache.value && now < groqModelCache.expiresAt) return groqModelCache.value;
+
+	try {
+		const response = await fetch('https://api.groq.com/openai/v1/models', {
+			headers: { Authorization: `Bearer ${groqApiKey}` },
+		});
+		if (!response.ok) {
+			throw new Error(`Groq models request failed with status ${response.status}`);
+		}
+		const data = await response.json();
+		const models = Array.isArray(data?.data)
+			? data.data
+				.map((item) => typeof item?.id === 'string' ? item.id : null)
+				.filter(Boolean)
+			: [];
+		const resolvedModels = models.length ? models : fallbackGroqModels;
+		groqModelCache.value = resolvedModels;
+		groqModelCache.expiresAt = Date.now() + 60 * 60 * 1000;
+		return resolvedModels;
+	} catch (error) {
+		console.warn('Không thể lấy danh sách model từ Groq, dùng danh sách dự phòng:', error.message);
+		return fallbackGroqModels;
+	}
+}
 
 async function readGuidanceFile() {
 	try {
@@ -68,7 +105,14 @@ async function serveStatic(request, response) {
 const server = createServer(async (request, response) => {
 	try {
 		if (request.method === 'GET' && request.url === '/api/config') {
-			sendJson(response, 200, { configured: Boolean(groqApiKey), tavilyConfigured: Boolean(tavilyApiKey), model: groqModel });
+			const availableModels = await getGroqAvailableModels();
+			const resolvedModel = availableModels.includes(defaultGroqModel) ? defaultGroqModel : (availableModels[0] || defaultGroqModel);
+			sendJson(response, 200, {
+				configured: Boolean(groqApiKey),
+				tavilyConfigured: Boolean(tavilyApiKey),
+				model: resolvedModel,
+				availableModels,
+			});
 			return;
 		}
 
@@ -120,11 +164,17 @@ const server = createServer(async (request, response) => {
 				return;
 			}
 
-			const { message, history = [], attachment, link, webSearch = false } = await readJson(request);
+			const { message, history = [], attachment, link, webSearch = false, model: requestedModel } = await readJson(request);
 			if (typeof message !== 'string' || !message.trim()) {
 				sendJson(response, 400, { error: 'Tin nhắn không được để trống.' });
 				return;
 			}
+			const availableModels = await getGroqAvailableModels();
+			const selectedModel = typeof requestedModel === 'string' && availableModels.includes(requestedModel)
+				? requestedModel
+				: availableModels.includes(defaultGroqModel)
+					? defaultGroqModel
+					: (availableModels[0] || defaultGroqModel);
 			const normalizedHistory = Array.isArray(history) ? history : [];
 			const isFirstMessageInNewChat = normalizedHistory.length === 0;
 			const guidanceText = isFirstMessageInNewChat ? await readGuidanceFile() : null;
@@ -174,7 +224,7 @@ const server = createServer(async (request, response) => {
 				link,
 				webSources,
 				apiKey: groqApiKey,
-				model: groqModel,
+				model: selectedModel,
 			});
 			let linkFingerprint = null;
 			try {

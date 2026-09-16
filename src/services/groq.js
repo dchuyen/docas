@@ -21,18 +21,9 @@ function formatWebSources(sources) {
 	].filter(Boolean).join('\n')).join('\n\n');
 }
 
-export function appendTimestampToPrompt(message) {
-	const now = new Date();
-	const formattedDateTime = new Intl.DateTimeFormat('vi-VN', {
-		timeZone: 'Asia/Ho_Chi_Minh',
-		dateStyle: 'full',
-		timeStyle: 'short',
-		hour12: false,
-	}).format(now);
-	return `${message}\n\n[Thời gian hiện tại: ${formattedDateTime}]`;
-}
+const MAX_GROQ_REQUEST_BYTES = 18 * 1024 * 1024;
 
-export async function askGroq({ message, history, attachment, link, webSources = [], apiKey, model }) {
+function createMessages({ message, history, attachment, link, webSources }) {
 	const userPrompt = appendTimestampToPrompt(message);
 	const userParts = [{ type: 'text', text: userPrompt }];
 	if (attachment) userParts.push(createAttachmentPart(attachment));
@@ -46,13 +37,44 @@ export async function askGroq({ message, history, attachment, link, webSources =
 		});
 	}
 
-	const contents = [
-		...history.slice(-20).map(({ role, text }) => ({
-			role: role === 'assistant' ? 'model' : 'user',
+	return [
+		{ role: 'system', content: 'You are a thoughtful, concise AI assistant. Answer in the same language as the user.' },
+		...history.map(({ role, text }) => ({
+			role: role === 'assistant' ? 'assistant' : 'user',
 			content: text,
 		})),
 		{ role: 'user', content: userParts },
 	];
+}
+
+function createRequestBody({ message, history, attachment, link, webSources, model }) {
+	for (let historyCount = Math.min(history.length, 20); historyCount >= 0; historyCount -= 1) {
+		const body = {
+			model,
+			messages: createMessages({ message, history: historyCount ? history.slice(-historyCount) : [], attachment, link, webSources }),
+			temperature: 0.7,
+			max_tokens: 2048,
+		};
+		const serializedBody = JSON.stringify(body);
+		if (Buffer.byteLength(serializedBody, 'utf8') <= MAX_GROQ_REQUEST_BYTES) return serializedBody;
+	}
+
+	throw new Error('Tệp đính kèm hoặc nội dung yêu cầu quá lớn. Hãy dùng tệp nhỏ hơn 13 MB hoặc bỏ bớt nội dung rồi thử lại.');
+}
+
+export function appendTimestampToPrompt(message) {
+	const now = new Date();
+	const formattedDateTime = new Intl.DateTimeFormat('vi-VN', {
+		timeZone: 'Asia/Ho_Chi_Minh',
+		dateStyle: 'full',
+		timeStyle: 'short',
+		hour12: false,
+	}).format(now);
+	return `${message}\n\n[Thời gian hiện tại: ${formattedDateTime}]`;
+}
+
+export async function askGroq({ message, history, attachment, link, webSources = [], apiKey, model }) {
+	const requestBody = createRequestBody({ message, history, attachment, link, webSources, model });
 
 	const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
 		method: 'POST',
@@ -60,15 +82,7 @@ export async function askGroq({ message, history, attachment, link, webSources =
 			'Content-Type': 'application/json',
 			Authorization: `Bearer ${apiKey}`,
 		},
-		body: JSON.stringify({
-			model,
-			messages: [
-				{ role: 'system', content: 'You are a thoughtful, concise AI assistant. Answer in the same language as the user.' },
-				...contents.map(({ role, content }) => ({ role: role === 'model' ? 'assistant' : role, content })),
-			],
-			temperature: 0.7,
-			max_tokens: 2048,
-		}),
+		body: requestBody,
 	});
 
 	const data = await groqResponse.json();

@@ -15,7 +15,7 @@ function renderInlineMarkdown(value) {
     codeTokens.push(`<code>${code}</code>`);
     return token;
   });
-  const linked = escaped.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  const linked = escaped.replace(/(?:\[([^\]\n]+)\]|【([^】\n]+)】)\((https?:\/\/[^\s)]+)\)/g, (_, markdownLabel, citationLabel, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${markdownLabel || citationLabel}</a>`);
   const formatted = linked
     .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
     .replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
@@ -26,6 +26,15 @@ function renderInlineMarkdown(value) {
 
 export function normalizeAssistantText(value) {
   return value.replace(/(^|\n)(\s*)\*\s+/g, '$1$2- ');
+}
+
+function splitTableRow(line) {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+  return trimmed.split('|').map((cell) => cell.trim());
+}
+
+function isTableSeparator(line) {
+  return splitTableRow(line).length > 0 && splitTableRow(line).every((cell) => /^:?-{3,}:?$/.test(cell));
 }
 
 export function renderMarkdown(value) {
@@ -48,7 +57,8 @@ export function renderMarkdown(value) {
     }
   };
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     const fence = line.match(/^\s*```(?:[\w+-]+)?\s*$/);
     if (fence) {
       flushParagraph();
@@ -63,6 +73,20 @@ export function renderMarkdown(value) {
     }
     if (codeLines) {
       codeLines.push(line);
+      continue;
+    }
+    if (line.includes('|') && lineIndex + 1 < lines.length && isTableSeparator(lines[lineIndex + 1])) {
+      flushParagraph();
+      closeList();
+      const headerCells = splitTableRow(line);
+      const rows = [];
+      lineIndex += 2;
+      while (lineIndex < lines.length && lines[lineIndex].includes('|') && lines[lineIndex].trim()) {
+        rows.push(splitTableRow(lines[lineIndex]));
+        lineIndex += 1;
+      }
+      lineIndex -= 1;
+      html.push(`<table><thead><tr>${headerCells.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${headerCells.map((_, index) => `<td>${renderInlineMarkdown(row[index] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
       continue;
     }
     if (!line.trim()) {

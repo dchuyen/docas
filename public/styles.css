@@ -61,6 +61,10 @@ h1 em { color: var(--accent); font-style: normal; }
 .message-text ol { margin: 0 0 12px; padding-left: 24px; white-space: normal; }
 .message-text li { padding-left: 4px; }
 .message-text blockquote { margin: 0 0 12px; padding-left: 13px; border-left: 2px solid var(--accent); color: var(--muted); white-space: normal; }
+.message-text table { width: 100%; margin: 0 0 12px; border-collapse: collapse; font-size: .94em; }
+.message-text th, .message-text td { padding: 8px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.message-text th { background: rgba(128,128,110,.12); font-weight: 700; }
+.message-text td p, .message-text th p { margin: 0; }
 .message-text hr { margin: 16px 0; border: 0; border-top: 1px solid var(--line); }
 .message-text code { padding: 2px 5px; border-radius: 4px; background: rgba(128,128,110,.18); color: var(--accent); font: .9em 'DM Mono', monospace; white-space: pre-wrap; }
 .message-text pre { margin: 0 0 12px; padding: 12px 14px; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: rgba(0,0,0,.18); white-space: pre; }
@@ -83,6 +87,9 @@ textarea::placeholder { color: #717168; }
 .composer-actions { position: relative; display: flex; align-items: center; justify-content: flex-start; margin-top: 10px; }
 .attach-button { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font-size: 19px; line-height: 1; transition: .2s; }.attach-button:hover { border-color: var(--accent); color: var(--accent); }.attachment-menu { position: absolute; bottom: 48px; left: 0; z-index: 2; width: 190px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: #24241f; box-shadow: 0 12px 30px rgba(0,0,0,.28); }.attachment-menu[hidden] { display: none; }.attachment-menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 8px; border-radius: 4px; background: transparent; color: var(--muted); text-align: left; font-size: 11px; }.attachment-menu button:hover { background: #303029; color: var(--accent); }.attachment-menu button:first-letter { color: var(--accent); font-size: 16px; }
 .hint, .composer-note { color: var(--dim); font: 10px 'DM Mono', monospace; }
+.model-picker { display: inline-flex; align-items: center; gap: 8px; margin-left: 10px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255,255,255,.02); color: var(--muted); font: 10px 'DM Mono', monospace; }
+.model-picker select { border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; }
+.model-picker option { background: #1a1a17; color: var(--ink); }
 .web-search-toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; color: var(--muted); font: 10px 'DM Mono', monospace; cursor: pointer; user-select: none; }
 .web-search-toggle input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
 .web-search-toggle:has(input:checked) { color: var(--accent); }
