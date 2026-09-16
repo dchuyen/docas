@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
-import { askGroq, searchTavily } from './services/ai-provider.js';
+import { askGroq } from './services/groq.js';
+import { searchTavily } from './services/tavily.js';
 import { downloadGoogleFile, getGoogleDocumentContent, getGoogleDocumentFingerprint, getGoogleFileTitle, googleExportUrl } from './services/google-documents.js';
 
 const port = Number(process.env.PORT) || 3000;
