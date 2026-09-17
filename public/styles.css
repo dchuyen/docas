@@ -87,12 +87,18 @@ textarea::placeholder { color: #717168; }
 .composer-actions { position: relative; display: flex; align-items: center; justify-content: flex-start; margin-top: 10px; }
 .attach-button { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font-size: 19px; line-height: 1; transition: .2s; }.attach-button:hover { border-color: var(--accent); color: var(--accent); }.attachment-menu { position: absolute; bottom: 48px; left: 0; z-index: 2; width: 190px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: #24241f; box-shadow: 0 12px 30px rgba(0,0,0,.28); }.attachment-menu[hidden] { display: none; }.attachment-menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 8px; border-radius: 4px; background: transparent; color: var(--muted); text-align: left; font-size: 11px; }.attachment-menu button:hover { background: #303029; color: var(--accent); }.attachment-menu button:first-letter { color: var(--accent); font-size: 16px; }
 .hint, .composer-note { color: var(--dim); font: 10px 'DM Mono', monospace; }
-.model-picker { display: inline-flex; align-items: center; gap: 8px; margin-left: 10px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255,255,255,.02); color: var(--muted); font: 10px 'DM Mono', monospace; }
+.model-picker { display: inline-flex; align-items: center; gap: 8px; margin-left: 10px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255,255,255,.04); color: var(--ink); font: 10px 'DM Mono', monospace; }
 .model-picker select { border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; }
-.model-picker option { background: #1a1a17; color: var(--ink); }
-.web-search-toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; color: var(--muted); font: 10px 'DM Mono', monospace; cursor: pointer; user-select: none; }
+.model-picker option { background: var(--panel); color: var(--ink); }
+.web-search-controls { display: inline-flex; align-items: center; gap: 8px; margin-left: 10px; }
+.web-search-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font: 10px 'DM Mono', monospace; cursor: pointer; user-select: none; }
 .web-search-toggle input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
 .web-search-toggle:has(input:checked) { color: var(--accent); }
+.web-search-limit { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255,255,255,.04); color: var(--ink); font: 10px 'DM Mono', monospace; }
+.web-search-limit select { border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; min-width: 40px; }
+.web-search-limit option { background: var(--panel); color: var(--ink); }
+.web-search-limit:has(select:disabled) { opacity: 0.5; }
+.web-search-limit select:disabled { color: var(--muted); cursor: not-allowed; }
 .hint { margin-left: auto; }
 .send-button { display: grid; place-items: center; width: 31px; height: 31px; margin-left: 12px; border-radius: 6px; background: var(--accent); color: var(--accent-ink); font-size: 20px; font-weight: 700; transition: .2s; }
 .send-button:hover { background: #e4ff8e; transform: translateY(-1px); }.send-button:disabled { opacity: .45; cursor: wait; transform: none; }
@@ -140,6 +146,9 @@ textarea::placeholder { color: #717168; }
 [data-theme="light"] .message-body { color: #4c5048; }
 [data-theme="light"] .message.user .message-body { background: #e5e8dc; color: var(--ink); }
 [data-theme="light"] .composer-inner { border-color: #d1d4c8; background: #ffffff; box-shadow: 0 12px 40px rgba(48,53,35,.1); }
+[data-theme="light"] .model-picker, [data-theme="light"] .web-search-limit { background: #f3f5ee; border-color: rgba(32,34,29,.18); color: var(--ink); }
+[data-theme="light"] .model-picker select, [data-theme="light"] .web-search-limit select { color: var(--ink); }
+[data-theme="light"] .model-picker option, [data-theme="light"] .web-search-limit option { background: #ffffff; color: var(--ink); }
 [data-theme="light"] textarea::placeholder { color: #9b9e94; }
 [data-theme="light"] .attachment-menu { background: #ffffff; box-shadow: 0 12px 30px rgba(48,53,35,.18); }
 [data-theme="light"] .attachment-menu button:hover { background: #eef1e7; }

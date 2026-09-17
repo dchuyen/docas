@@ -51,16 +51,6 @@ async function getGroqAvailableModels() {
 	}
 }
 
-async function readGuidanceFile() {
-	try {
-		const filePath = join(projectRoot, 'huongdan.txt');
-		return await readFile(filePath, 'utf8');
-	} catch (error) {
-		console.warn('Không tìm thấy hoặc không đọc được huongdan.txt:', error.message);
-		return null;
-	}
-}
-
 const contentTypes = {
 	'.css': 'text/css; charset=utf-8',
 	'.html': 'text/html; charset=utf-8',
@@ -164,11 +154,14 @@ const server = createServer(async (request, response) => {
 				return;
 			}
 
-			const { message, history = [], attachment, link, webSearch = false, model: requestedModel } = await readJson(request);
+			const { message, history = [], attachment, link, webSearch = false, webSearchLimit, model: requestedModel } = await readJson(request);
 			if (typeof message !== 'string' || !message.trim()) {
 				sendJson(response, 400, { error: 'Tin nhắn không được để trống.' });
 				return;
 			}
+			const normalizedWebSearchLimit = Number.isFinite(Number(webSearchLimit))
+				? Math.min(Math.max(Number(webSearchLimit), 1), 20)
+				: 5;
 			const availableModels = await getGroqAvailableModels();
 			const selectedModel = typeof requestedModel === 'string' && availableModels.includes(requestedModel)
 				? requestedModel
@@ -176,11 +169,7 @@ const server = createServer(async (request, response) => {
 					? defaultGroqModel
 					: (availableModels[0] || defaultGroqModel);
 			const normalizedHistory = Array.isArray(history) ? history : [];
-			const isFirstMessageInNewChat = normalizedHistory.length === 0;
-			const guidanceText = isFirstMessageInNewChat ? await readGuidanceFile() : null;
-			const guidedMessage = guidanceText
-				? `Hãy làm theo file huongdan.txt dưới đây và tuân thủ nghiêm ngặt các quy định trong đó.\n\n${guidanceText}\n\nYêu cầu của người dùng:\n${message.trim()}`
-				: message.trim();
+			const guidedMessage = message.trim();
 			if (attachment) {
 				const allowedTypes = /^(image\/(jpeg|png|webp|gif)|application\/pdf|text\/plain|text\/csv|text\/markdown|application\/json)$/;
 				if (!allowedTypes.test(attachment.mimeType) || typeof attachment.data !== 'string') {
@@ -203,7 +192,7 @@ const server = createServer(async (request, response) => {
 			let webSources = [];
 			if (webSearch) {
 				try {
-					webSources = await searchTavily(message.trim(), tavilyApiKey);
+					webSources = await searchTavily(message.trim(), tavilyApiKey, normalizedWebSearchLimit);
 				} catch (error) {
 					sendJson(response, 422, { error: error.message || 'Không thể tìm kiếm trên web.' });
 					return;

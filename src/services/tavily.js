@@ -7,8 +7,12 @@ function getApiErrorMessage(value, fallback) {
 	return fallback;
 }
 
-export async function searchTavily(query, apiKey) {
+export async function searchTavily(query, apiKey, maxResults = 5) {
 	if (!apiKey) throw new Error('Chưa cấu hình TAVILY_API_KEY trên server.');
+
+	const normalizedMaxResults = Number.isFinite(Number(maxResults))
+		? Math.min(Math.max(Number(maxResults), 1), 20)
+		: 5;
 
 	const tavilyResponse = await fetch('https://api.tavily.com/search', {
 		method: 'POST',
@@ -17,7 +21,7 @@ export async function searchTavily(query, apiKey) {
 			api_key: apiKey,
 			query,
 			search_depth: 'basic',
-			max_results: 5,
+			max_results: normalizedMaxResults,
 			include_answer: false,
 			include_raw_content: false,
 		}),

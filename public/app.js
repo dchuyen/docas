@@ -35,11 +35,13 @@ const statusDot = document.querySelector('.status-dot');
 const conversationList = document.querySelector('#conversation-list');
 const themeToggle = document.querySelector('#theme-toggle');
 const webSearchToggle = document.querySelector('#web-search-toggle');
+const webSearchLimit = document.querySelector('#web-search-limit');
 const modelSelector = document.querySelector('#model-selector');
 const conversationsStorageKey = 'docas-conversations';
 const activeConversationStorageKey = 'docas-active-conversation';
 const themeStorageKey = 'docas-theme';
 const groqModelStorageKey = 'docas-groq-model';
+const webSearchLimitStorageKey = 'docas-web-search-limit';
 const documentCheckIntervals = { '15m': 15 * 60 * 1000, '1h': 60 * 60 * 1000, '1d': 24 * 60 * 60 * 1000 };
 const documentCheckTimers = new Map();
 let history = [];
@@ -448,10 +450,10 @@ async function checkConfig() {
     const config = await response.json();
     applyModelOptions(config);
     if (config.configured && config.tavilyConfigured) {
-      connectionLabel.textContent = `${config.model || 'AI'} · Tìm web đã sẵn sàng`;
+      connectionLabel.textContent = 'AI đã sẵn sàng · Tìm kiếm đã sẵn sàng';
       statusDot.classList.add('ready');
     } else if (config.configured) {
-      connectionLabel.textContent = `${config.model || 'AI'} · Tìm web chưa sẵn sàng`;
+      connectionLabel.textContent = 'AI đã sẵn sàng';
       statusDot.classList.add('ready');
     } else {
       connectionLabel.textContent = 'Chờ API key';
@@ -465,6 +467,8 @@ async function sendMessage(text, options = {}) {
   const message = text.trim();
   const file = options.attachment || selectedFile;
   const webSearch = options.webSearch ?? webSearchToggle.checked;
+  const webSearchLimitValue = Number(webSearchLimit?.value || 5);
+  const normalizedWebSearchLimit = Number.isFinite(webSearchLimitValue) ? Math.min(Math.max(webSearchLimitValue, 1), 20) : 5;
   const newLink = options.link ?? selectedLink.trim();
   const storedLink = [...sentDocuments].reverse().find((itemDocument) => itemDocument.url)?.url || '';
   const link = newLink || (options.includeStoredLink === false ? '' : storedLink);
@@ -475,7 +479,7 @@ async function sendMessage(text, options = {}) {
   const contextFile = file || storedFile;
   if ((!message && !contextFile && !link) || sendButton.disabled) return;
   welcomeElement.hidden = true;
-  const visibleMessage = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}${newLink ? `\n\n🔗 ${newLink}` : ''}${webSearch ? '\n\n⌕ Tìm kiếm web' : ''}`;
+  const visibleMessage = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}${newLink ? `\n\n🔗 ${newLink}` : ''}${webSearch ? `\n\n⌕ Tìm kiếm web (${normalizedWebSearchLimit} nguồn)` : ''}`;
   const userMessageElement = addMessage('user', visibleMessage);
   input.value = '';
   input.style.height = 'auto';
@@ -496,6 +500,7 @@ async function sendMessage(text, options = {}) {
         attachment,
         link: link || undefined,
         webSearch,
+        webSearchLimit: normalizedWebSearchLimit,
         model: modelSelector?.value || localStorage.getItem(groqModelStorageKey) || undefined,
       }),
     });
@@ -506,7 +511,7 @@ async function sendMessage(text, options = {}) {
       throw new Error(errorMessage);
     }
     if (newLink && data.linkTitle) {
-      userMessageElement.querySelector('.message-text').textContent = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}\n\n🔗 ${data.linkTitle}${webSearch ? '\n\n⌕ Tìm kiếm web' : ''}`;
+      userMessageElement.querySelector('.message-text').textContent = `${message || 'Hãy phân tích nội dung đính kèm.'}${file ? `\n\n📎 ${file.name}` : ''}\n\n🔗 ${data.linkTitle}${webSearch ? `\n\n⌕ Tìm kiếm web (${normalizedWebSearchLimit} nguồn)` : ''}`;
     }
     let fileDocument = null;
     if (file) {
@@ -528,6 +533,22 @@ async function sendMessage(text, options = {}) {
     sendButton.disabled = false;
     input.focus();
   }
+}
+
+if (webSearchLimit) {
+  const optionMarkup = Array.from({ length: 20 }, (_, index) => `<option value="${index + 1}">${index + 1}</option>`).join('');
+  webSearchLimit.innerHTML = optionMarkup;
+  const savedWebSearchLimit = localStorage.getItem(webSearchLimitStorageKey) || '5';
+  const validLimit = Number(savedWebSearchLimit);
+  webSearchLimit.value = Number.isInteger(validLimit) && validLimit >= 1 && validLimit <= 20 ? String(validLimit) : '5';
+  localStorage.setItem(webSearchLimitStorageKey, webSearchLimit.value);
+  webSearchLimit.disabled = !webSearchToggle.checked;
+  webSearchToggle.addEventListener('change', () => {
+    webSearchLimit.disabled = !webSearchToggle.checked;
+  });
+  webSearchLimit.addEventListener('change', () => {
+    localStorage.setItem(webSearchLimitStorageKey, webSearchLimit.value);
+  });
 }
 
 modelSelector?.addEventListener('change', () => {
